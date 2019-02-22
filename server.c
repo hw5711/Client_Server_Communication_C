@@ -1,95 +1,79 @@
-#include "unp.h"
-#define UNIX_DOMAIN "/tmp/UNIX.domain
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <errno.h>
+#include <string.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 
-void send_fd(int sfd, int fd)
-{
-    char buf[2] = {0};
-    struct iovec iov[1];
-	struct msghdr msg;
-    struct cmsghdr *cmptr= NULL;
-    union
-    {
-      struct cmsghdr cm;
-      char control[CMSG_SPACE(sizeof(int))];
-     }control_un;
-
-    msg.msg_control = control_un.control;//
-    msg.msg_controllen = sizeof(control_un.control);
-    cmptr = CMSG_FIRSTHDR(&msg);
-    cmptr->cmsg_len = CMSG_LEN(sizeof(int)); 
-    cmptr->cmsg_level = SOL_SOCKET;
-    cmptr->cmsg_type = SCM_RIGHTS;
-      
-    iov[0].iov_base = buf;
-    iov[0].iov_len = 2;
-    msg.msg_iov = iov;
-    msg.msg_iovlen = 1;
-    msg.msg_name = NULL;         
-    msg.msg_namelen = 0;    
-    *(int *)CMSG_DATA(cmptr) = fd;
-
-    if(sendmsg(sfd,&msg,0)== -1)
-      printf("send error");   
-	exit(0);
-}
-
+#define MAXLINE 1024
 void str_echo(int sockfd)
 {
     ssize_t n;
     char buf[MAXLINE];
-    n = read(sockfd, buf, MAXLINE);
-
-    if(n>0)
-    {
-        printf("Received file path is %s\n",buf);
-		/* open the file with the file path sent by client */
-		int fd = open(buf,O_RDONLY|O_CREAT,S_IRWXO);
-	    
-	    if(fd == -1)
-	    {
-	        printf("file is not exist.\n");
-            exit(1);
-	    }
-	    else
-	    {
-	        printf("file was opened.\n");              
-		printf("send the file descriptor to the client.\n");
-		send_fd(sockfd,fd);
-	        close(fd); 
+    n = read(sockfd, buf, strlen(buf));
+   while(1)
+   {
+     if(n > 0)
+        {
+	  printf("clien send: %s\n",buf);
+          write(sockfd, buf,strlen(buf));
+          memset(buf,0,sizeof(buf));
+          exit(0);
         }
+    else {
+       printf("str_echo: read error");
+       exit(0);}
     }
-    else 
-        printf("str_echo: read error");
-    exit(1);
 }
 
 
 int main(int argc, char **argv)
 {
-    ssize_t nbytes;
-    int sfd, cfd, *fds;
+    int listenfd, connfd;
     pid_t childpid;
-    char buf[MAXLINE];
-    int fd;
-    struct sockaddr_un addr, cliaddr;
-    sfd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (sfd == -1)
-    printf ("Failed to create socket");
+    socklen_t clilen;
+    struct sockaddr_in cliaddr, servaddr;
 
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, UNIX_DOMAIN,sizeof(addr.sun_path)-1);
-    unlink (UNIX_DOMAIN);			
-				
-    if (bind(sfd, (struct sockaddr *) &addr, sizeof(addr)) == -1)
-        printf ("Failed to bind to socket");
-    if (listen(sfd, 5) == -1)
-        printf ("Failed to listen on socket");
-    printf("listening...\n");
+    listenfd = socket(AF_INET, SOCK_STREAM, 0);
+
+    if(listenfd<0)
+        {
+            printf("Failed to create socket.");
+            exit(1);
+        }
+    printf("Socket created.\n");
+    const int flag = 1;
+    int ret;
+
+    ret = setsockopt(listenfd, IPPROTO_TCP, TCP_NODELAY, (const char *)&flag, sizeof(flag));
+    if (ret == -1)
+	printf("Couldn't setsockopt(TCP_NODELAY)\n");
+    else
+        printf("Disabled Nagle algorithm.\n");
+
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    servaddr.sin_port = htons(7979);
+
+    if(bind(listenfd, (struct sockaddr *)&servaddr, sizeof(servaddr)))
+    {
+	printf("bind failed");
+        exit(1);
+    }
+
+    listen(listenfd, 64);
+    printf("Listen...\n");
     do
     {
-        int clilen = sizeof(cliaddr);
-        int connfd = accept(sfd, (struct sockaddr *)&cliaddr, &clilen);
-	    printf("Connected with client.\n");
+        clilen = sizeof(cliaddr);
+        connfd = accept(listenfd, (struct sockaddr *)&cliaddr, &clilen);
+	printf("Connected with client.\n");
 
         if((childpid = fork()) == 0)
         {

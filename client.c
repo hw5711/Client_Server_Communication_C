@@ -1,111 +1,62 @@
-#include "unp.h"
-#define UNIX_DOMAIN "/tmp/UNIX.domain"
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <errno.h>
+#include <string.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 
-int recv_fd(int sockfd)
+#define MAXLINE 1024
+
+void str_cli( int sockfd)
 {
-	int newfd, nr;
-	char buf[2];//
-	ssize_t n;
-    struct iovec iov[1];
-    struct msghdr msg;
-    struct cmsghdr *cmptr;
-    
-    union
-    {
-      struct cmsghdr cm;
-      char control[CMSG_SPACE(sizeof(int))];
-     }control_un;
+    int nrecv;
+    char recvline[MAXLINE];
+    char sendline[]="hello";
 
-    msg.msg_control = control_un.control;
-    msg.msg_controllen = sizeof(control_un.control);
-
-    cmptr = CMSG_FIRSTHDR(&msg);
-    cmptr->cmsg_len = CMSG_LEN(sizeof(int)); 
-    cmptr->cmsg_level = SOL_SOCKET;
-    cmptr->cmsg_type = SCM_RIGHTS;
-    iov[0].iov_base = buf;
-    iov[0].iov_len = 2;
-    msg.msg_iov = iov;
-    msg.msg_iovlen = 1;
-    msg.msg_name = NULL;         
-    msg.msg_namelen = 0;  
-	
-    if((nr=recvmsg(sockfd, &msg, 0))<0)
-	{
-	    printf("recv error");
-	    exit(1);
-	}
-	else
-	{
-	    newfd = *(int *)CMSG_DATA(cmptr);//newfd to fp
-	    printf("Receive file descriptor successfully.\n");
-		
-       	    /* output content of the test file. but I failed.  */
-	    char *buffer;
-	    long lSize;
-            size_t result;
-		
-            /* transfer file descriptor to file structure */
-	    FILE *fp;
-	    fp = fdopen(newfd, "r");
-	    printf("transfer file descriptor to file structure\n");
-		
-	    fseek (fp , 0 , SEEK_END);	      
-            lSize = ftell (fp);
-       	    rewind (fp);
-            buffer = (char*) malloc (sizeof(char)*lSize);
-    
-            if (buffer == NULL)
-            {
-            	fputs ("Memory error",stderr); 
-            	exit (1);
-            }
-	}
- 
-    result = fread (buffer,1,lSize,fp);
-    if (result != lSize)
-    {
-        fputs ("Reading error",stderr);
-        exit (1);
-        printf("%s", buffer); 
-        fclose (fp);
-        free (buffer);
-  	}
-	return 0;
+    printf("send string to server.\n");
+    write(sockfd,sendline, strlen(sendline));
+        nrecv = read(sockfd, recvline, strlen(recvline));
+    if(nrecv >=0){
+    	printf("Receive from server:%s\n",recvline);
+        memset(recvline,0,sizeof(recvline));
+        }
+    else{
+        printf("receive error.\n");
+        exit(0);}
+    memset(recvline,0,sizeof(recvline));
 }
 
-void str_cli(FILE *fp, int sockfd)
-{
-    char sendline[MAXLINE], recvline[MAXLINE];
-    printf("Which file you want to open? (type the path)\n");
-    while(fgets(sendline, MAXLINE, fp) != NULL)
-    {    
-        write(sockfd, sendline, strlen(sendline));
-        printf("Server is trying to open the file...\n");
-    	recv_fd(sockfd);
-    	printf("finished\n");
-    }
-}
 
 int main(int argc, char **argv)
 {
-    int sfd, fd;
-    FILE *fp;
-    ssize_t lenth;
-    struct sockaddr_un addr;
-    sfd = socket(AF_UNIX, SOCK_STREAM, 0); 
-    if (sfd == -1)
-   	printf ("Failed to create socket");	
+    int sockfd;
+    char buff[MAXLINE];
 
-    memset(&addr, 0, sizeof(struct sockaddr_un));
-    addr.sun_family = AF_UNIX;
-    strcpy(addr.sun_path, UNIX_DOMAIN);
+    struct sockaddr_in cliaddr, servaddr;
 
-    connect(sfd, (struct sockaddr *)&addr, sizeof(addr));
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    const int flag = 1;
+    int ret;
+
+    ret = setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (const char *)&flag, sizeof(flag));
+    if (ret == -1)
+	printf("Couldn't setsockopt(TCP_NODELAY)\n");
+    else
+        printf("Disabled Nagle algorithm.\n");
+    //bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(7979);
+    while(1){
+    if(connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr))<0)
+	printf("connect error");
     printf("connected with server.\n");
-
-    str_cli(stdin, sfd);
+    str_cli( sockfd);
     exit(0);
+    }
+    return 0;
 }
-
-
